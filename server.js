@@ -257,6 +257,7 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     plan: u.plan,
     activationPaid: u.activationPaid,
     planExpiry: u.planExpiry || null,
+    activatedAt: u.activatedAt || null,
   });
 });
 
@@ -336,6 +337,8 @@ app.post('/api/kiwify/webhook', async (req, res) => {
     user.activationPaid = true;
     user.plan = 'active';
     user.kiwifyOrderId = orderId;
+    // Guarda data da primeira ativação (para cálculo dos 7 dias CDC)
+    if (!user.activatedAt) user.activatedAt = Date.now();
     // Renova ou define expiração: se já tem planExpiry futuro, soma 30 dias; senão começa do zero
     const base = (user.planExpiry && user.planExpiry > Date.now()) ? user.planExpiry : Date.now();
     user.planExpiry = base + THIRTY_DAYS;
@@ -403,8 +406,52 @@ app.post('/api/kiwify/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
+// ── Solicitação de cancelamento CDC (7 dias) ──
+app.post('/api/auth/cancel-request', verifyToken, async (req, res) => {
+  const u = req.user;
+
+  if (u.isMaster || u.isDemo) {
+    return res.status(400).json({ error: 'Conta especial não pode ser cancelada.' });
+  }
+  if (!u.activatedAt) {
+    return res.status(400).json({ error: 'Nenhuma compra encontrada para esta conta.' });
+  }
+
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const diasDesdeAtivacao = Date.now() - u.activatedAt;
+
+  if (diasDesdeAtivacao > SEVEN_DAYS) {
+    return res.status(400).json({ error: 'O prazo de 7 dias para cancelamento já encerrou.' });
+  }
+
+  const diasRestantes = Math.ceil((SEVEN_DAYS - diasDesdeAtivacao) / (24 * 60 * 60 * 1000));
+  const dataCompra = new Date(u.activatedAt).toLocaleDateString('pt-BR');
+  const ADMIN_EMAIL = process.env.MASTER_EMAIL;
+
+  await sendEmail(
+    ADMIN_EMAIL,
+    '⚠ Solicitação de Cancelamento CDC — MinhaTaxaReal',
+    `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
+      <h2 style="color:#f5a623;margin-bottom:8px">⚠ Solicitação de Reembolso</h2>
+      <p style="color:#8a8880;margin-bottom:20px">Um usuário solicitou cancelamento dentro do prazo legal de 7 dias (CDC).</p>
+      <div style="background:#1e2026;border-radius:8px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 8px;color:#8a8880;font-size:13px">E-mail: <strong style="color:#f0ede8">${u.email}</strong></p>
+        <p style="margin:0 0 8px;color:#8a8880;font-size:13px">Nome: <strong style="color:#f0ede8">${u.name}</strong></p>
+        <p style="margin:0 0 8px;color:#8a8880;font-size:13px">Data da compra: <strong style="color:#f0ede8">${dataCompra}</strong></p>
+        <p style="margin:0 0 8px;color:#8a8880;font-size:13px">Order ID Kiwify: <strong style="color:#f0ede8">${u.kiwifyOrderId || 'N/A'}</strong></p>
+        <p style="margin:0;color:#8a8880;font-size:13px">Dias restantes no prazo: <strong style="color:#d4f03c">${diasRestantes} dia(s)</strong></p>
+      </div>
+      <p style="color:#8a8880;font-size:13px">Acesse o painel Kiwify → Vendas → localize o pedido e processe o reembolso.</p>
+      <hr style="border:1px solid #1e2026;margin:20px 0">
+      <p style="color:#545250;font-size:11px">MinhaTaxaReal · Cancelamento automático via sistema</p>
+    </div>`
+  );
+
+  console.log('[CANCELAMENTO CDC] Solicitação de:', u.email);
+  res.json({ ok: true, diasRestantes });
+});
+
 // ══════════════════════════════════════════════════════════════
-//  START
 // ══════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, async () => {
