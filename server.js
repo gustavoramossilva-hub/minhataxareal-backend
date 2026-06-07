@@ -229,6 +229,7 @@ app.post('/api/auth/login', async (req, res) => {
       name: user.name,
       plan: user.plan,
       activationPaid: user.activationPaid,
+      planExpiry: user.planExpiry || null,
     },
   });
 });
@@ -242,11 +243,20 @@ app.post('/api/auth/logout', verifyToken, (req, res) => {
 // Dados do usuário logado
 app.get('/api/auth/me', verifyToken, (req, res) => {
   const u = req.user;
+
+  // Verifica se o acesso expirou (exceto master e demo)
+  if (!u.isMaster && !u.isDemo && u.activationPaid && u.planExpiry && u.planExpiry < Date.now()) {
+    u.activationPaid = false;
+    u.plan = 'expired';
+    console.log('[ACESSO EXPIRADO]', u.email);
+  }
+
   res.json({
     email: u.email,
     name: u.name,
     plan: u.plan,
     activationPaid: u.activationPaid,
+    planExpiry: u.planExpiry || null,
   });
 });
 
@@ -321,14 +331,20 @@ app.post('/api/kiwify/webhook', async (req, res) => {
       console.log('[WEBHOOK] Usuário criado automaticamente:', buyerEmail);
     }
 
-    // Ativa o acesso
+    // Ativa o acesso com expiração de 30 dias
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
     user.activationPaid = true;
     user.plan = 'active';
     user.kiwifyOrderId = orderId;
+    // Renova ou define expiração: se já tem planExpiry futuro, soma 30 dias; senão começa do zero
+    const base = (user.planExpiry && user.planExpiry > Date.now()) ? user.planExpiry : Date.now();
+    user.planExpiry = base + THIRTY_DAYS;
+    console.log('[WEBHOOK] Acesso ativado até:', new Date(user.planExpiry).toISOString());
 
     // E-mail de boas-vindas com acesso
     const APP_URL = process.env.APP_URL || 'https://minhataxareal.com.br';
     const hasExistingAccount = !user.tempPassword;
+    const expiryDate = new Date(user.planExpiry).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
     const emailHtml = hasExistingAccount
       ? `
@@ -336,6 +352,7 @@ app.post('/api/kiwify/webhook', async (req, res) => {
           <h1 style="color:#d4f03c;font-size:24px;margin-bottom:8px">✓ Acesso liberado!</h1>
           <p style="color:#8a8880;margin-bottom:24px">Olá, <strong style="color:#f0ede8">${buyerName}</strong>! Seu pagamento foi confirmado.</p>
           <p style="color:#8a8880;margin-bottom:20px">Acesse o MinhaTaxaReal com seu e-mail e senha cadastrados:</p>
+          <p style="color:#545250;font-size:13px;margin-bottom:20px">📅 Acesso válido até: <strong style="color:#f0ede8">${expiryDate}</strong></p>
           <a href="${APP_URL}/auth.html" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Acessar agora →</a>
           <hr style="border:1px solid #1e2026;margin:28px 0">
           <p style="color:#545250;font-size:12px">Dúvidas? Responda este e-mail. Ferramenta de uso exclusivamente educativo e informativo.</p>
@@ -347,7 +364,8 @@ app.post('/api/kiwify/webhook', async (req, res) => {
           <p style="color:#8a8880;margin-bottom:8px">Seus dados de acesso:</p>
           <div style="background:#1e2026;border-radius:8px;padding:16px;margin-bottom:20px">
             <p style="margin:0 0 6px;color:#8a8880;font-size:13px">E-mail: <strong style="color:#f0ede8">${buyerEmail}</strong></p>
-            <p style="margin:0;color:#8a8880;font-size:13px">Senha provisória: <strong style="color:#d4f03c;font-family:monospace">${user.tempPassword}</strong></p>
+            <p style="margin:0 0 6px;color:#8a8880;font-size:13px">Senha provisória: <strong style="color:#d4f03c;font-family:monospace">${user.tempPassword}</strong></p>
+            <p style="margin:0;color:#8a8880;font-size:13px">📅 Acesso válido até: <strong style="color:#f0ede8">${expiryDate}</strong></p>
           </div>
           <p style="color:#8a8880;font-size:13px;margin-bottom:20px">⚠ Recomendamos que troque a senha após o primeiro acesso.</p>
           <a href="${APP_URL}/auth.html" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Acessar agora →</a>
@@ -372,7 +390,8 @@ app.post('/api/kiwify/webhook', async (req, res) => {
     const user = DB.users.get(buyerEmail);
     if (user) {
       user.activationPaid = false;
-      user.plan = 'none';
+      user.plan = 'refunded';
+      user.planExpiry = null;
       // Revoga todos os tokens do usuário
       for (const [jti, entry] of DB.tokens.entries()) {
         if (entry.email === buyerEmail) DB.tokens.delete(jti);
