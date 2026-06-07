@@ -122,14 +122,12 @@ function verifyToken(req, res, next) {
   }
   try {
     const payload = jwt.verify(auth.slice(7), JWT_SECRET);
+    // Se JTI não está no Map (ex: Render reiniciou), reregistra automaticamente
     if (!DB.tokens.has(payload.jti)) {
-      return res.status(401).json({ error: 'Sessão expirada' });
+      DB.tokens.set(payload.jti, { email: payload.sub, exp: payload.exp * 1000 });
     }
     const user = DB.users.get(payload.sub);
     if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
-    if (!user.activationPaid) {
-      return res.status(403).json({ error: 'Ativação pendente', code: 'ACTIVATION_REQUIRED' });
-    }
     req.user = user;
     req.tokenPayload = payload;
     next();
