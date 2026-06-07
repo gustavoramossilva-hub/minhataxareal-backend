@@ -146,7 +146,7 @@ async function sendEmail(to, subject, html) {
   }
   try {
     await resend.emails.send({
-      from: 'MinhaTaxaReal <onboarding@resend.dev>',
+      from: 'MinhaTaxaReal <noreply@minhataxareal.com.br>',
       to,
       subject,
       html
