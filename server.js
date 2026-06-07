@@ -138,10 +138,11 @@ function verifyToken(req, res, next) {
 }
 
 // ── E-mail ──
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465');
 const mailer = nodemailer.createTransport({
   host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-  port:   parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
+  port:   SMTP_PORT,
+  secure: SMTP_PORT === 465,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
