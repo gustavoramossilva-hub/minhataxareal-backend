@@ -17,7 +17,8 @@ const express    = require('express');
 const jwt        = require('jsonwebtoken');
 const bcrypt     = require('bcryptjs');
 const cors       = require('cors');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 const crypto     = require('crypto');
 
 const app = express();
@@ -138,26 +139,17 @@ function verifyToken(req, res, next) {
 }
 
 // ── E-mail ──
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465');
-const mailer = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-  port:   SMTP_PORT,
-  secure: SMTP_PORT === 465,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
 async function sendEmail(to, subject, html) {
-  if (!process.env.SMTP_USER) {
+  if (!process.env.RESEND_API_KEY) {
     console.log('[EMAIL SIMULADO]', { to, subject });
     return;
   }
   try {
-    await mailer.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to, subject, html
+    await resend.emails.send({
+      from: 'MinhaTaxaReal <onboarding@resend.dev>',
+      to,
+      subject,
+      html
     });
     console.log('[EMAIL ENVIADO]', { to, subject });
   } catch (e) {
