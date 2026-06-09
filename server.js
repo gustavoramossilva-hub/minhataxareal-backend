@@ -452,11 +452,13 @@ app.post('/api/auth/cancel-request', verifyToken, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, async () => {
-  console.log(`MinhaTaxaReal backend rodando na porta ${PORT}`);
-  console.log('Ambiente:', process.env.NODE_ENV || 'development');
-  // Carrega contas especiais ao iniciar
-  await carregarContasEspeciais();
+
+// Carrega contas especiais ANTES de aceitar conexões
+carregarContasEspeciais().then(() => {
+  app.listen(PORT, () => {
+    console.log(`MinhaTaxaReal backend rodando na porta ${PORT}`);
+    console.log('Ambiente:', process.env.NODE_ENV || 'development');
+  });
 });
 
 module.exports = app;
