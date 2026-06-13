@@ -58,6 +58,7 @@ async function carregarContasEspeciais() {
       activationPaid: true,
       isMaster: true,
       kiwifyOrderId: 'master',
+      tier: 'premium',
       createdAt: Date.now(),
       lastLogin: null,
     });
@@ -79,6 +80,7 @@ async function carregarContasEspeciais() {
       activationPaid: true,
       isDemo: true,
       kiwifyOrderId: 'demo',
+      tier: 'premium',
       createdAt: Date.now(),
       lastLogin: null,
     });
