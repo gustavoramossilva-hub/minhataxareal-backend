@@ -188,7 +188,7 @@ app.get('/api/health', (req, res) => {
 
 // Registro
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, password, name, tier } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'E-mail, senha e nome são obrigatórios' });
   }
@@ -200,16 +200,18 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(409).json({ error: 'E-mail já cadastrado' });
   }
   const passwordHash = await bcrypt.hash(password, 12);
+  const validTier = tier === 'premium' ? 'premium' : 'standard';
   const user = {
     email: key, passwordHash, name,
     plan: 'none',
+    tier: validTier,
     activationPaid: false,
     kiwifyOrderId: null,
     createdAt: Date.now(),
     lastLogin: null,
   };
   DB.users.set(key, user);
-  console.log('[REGISTRO]', key);
+  console.log('[REGISTRO]', key, '| tier:', validTier);
   res.status(201).json({ message: 'Conta criada. Faça login para continuar.' });
 });
 
@@ -230,6 +232,7 @@ app.post('/api/auth/login', async (req, res) => {
       email: user.email,
       name: user.name,
       plan: user.plan,
+      tier: user.tier || 'standard',
       activationPaid: user.activationPaid,
       planExpiry: user.planExpiry || null,
     },
@@ -257,6 +260,7 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     email: u.email,
     name: u.name,
     plan: u.plan,
+    tier: u.tier || 'standard',
     activationPaid: u.activationPaid,
     planExpiry: u.planExpiry || null,
     activatedAt: u.activatedAt || null,
