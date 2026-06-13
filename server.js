@@ -97,7 +97,9 @@ const DB = {
 
 // Schema do usuário:
 // { email, passwordHash, name, plan, activationPaid,
-//   kiwifyOrderId, createdAt, lastLogin }
+//   kiwifyOrderId, createdAt, lastLogin, activatedAt,
+//   planExpiry, tier }
+// tier: 'standard' | 'premium'  (dimensão independente do plan)
 
 // ══════════════════════════════════════════════════════════════
 //  HELPERS
@@ -256,6 +258,7 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     activationPaid: u.activationPaid,
     planExpiry: u.planExpiry || null,
     activatedAt: u.activatedAt || null,
+    tier: u.tier || 'standard',
   });
 });
 
@@ -305,6 +308,21 @@ app.post('/api/kiwify/webhook', async (req, res) => {
     return res.json({ received: true });
   }
 
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+
+  // Mapeamento de product_id → tier
+  // Variáveis de ambiente preenchidas com os IDs reais após criação no Kiwify
+  const PROD_ATIV_STANDARD   = process.env.KIWIFY_PRODUCT_ATIVACAO_STANDARD;
+  const PROD_ASSN_STANDARD   = process.env.KIWIFY_PRODUCT_ASSINATURA_STANDARD;
+  const PROD_ATIV_PREMIUM    = process.env.KIWIFY_PRODUCT_ATIVACAO_PREMIUM;
+  const PROD_ASSN_PREMIUM    = process.env.KIWIFY_PRODUCT_ASSINATURA_PREMIUM;
+
+  const isPremiumSubscription = PROD_ASSN_PREMIUM   && productId === PROD_ASSN_PREMIUM;
+  const isStandardSubscription= PROD_ASSN_STANDARD  && productId === PROD_ASSN_STANDARD;
+  const isPremiumOnly = isPremiumSubscription || (PROD_ATIV_PREMIUM && productId === PROD_ATIV_PREMIUM);
+
+  console.log('[WEBHOOK] product_id:', productId, '| isPremiumSubscription:', isPremiumSubscription);
+
   // ── PAGAMENTO CONFIRMADO ──
   if (status === 'paid' || status === 'complete') {
 
@@ -324,23 +342,47 @@ app.post('/api/kiwify/webhook', async (req, res) => {
         kiwifyOrderId: null,
         createdAt: Date.now(),
         lastLogin: null,
+        tier: 'standard',
         tempPassword, // guardamos para enviar no e-mail
       };
       DB.users.set(buyerEmail, user);
       console.log('[WEBHOOK] Usuário criado automaticamente:', buyerEmail);
     }
 
-    // Ativa o acesso com expiração de 30 dias
-    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    if (isPremiumOnly && !isPremiumSubscription) {
+      // ── Ativação Premium (produto de ativação única R$69,90) ──
+      // Apenas registra o product_id — o tier é promovido pela assinatura
+      user.kiwifyOrderId = orderId;
+      console.log('[WEBHOOK] Ativação premium registrada:', buyerEmail);
+      res.json({ received: true });
+      return;
+    }
+
+    if (isPremiumSubscription) {
+      // ── Assinatura Premium ──
+      user.tier = 'premium';
+      user.activationPaid = true;
+      user.plan = 'active';
+      user.kiwifyOrderId = orderId;
+      if (!user.activatedAt) user.activatedAt = Date.now();
+      const baseP = (user.planExpiry && user.planExpiry > Date.now()) ? user.planExpiry : Date.now();
+      user.planExpiry = baseP + THIRTY_DAYS;
+      console.log('[WEBHOOK] Assinatura Premium ativada para:', buyerEmail, '| tier: premium');
+      res.json({ received: true });
+      return;
+    }
+
+    // ── Assinatura/ativação Standard (ou produto não mapeado → trata como standard) ──
+    if (isStandardSubscription) user.tier = 'standard';
     user.activationPaid = true;
     user.plan = 'active';
     user.kiwifyOrderId = orderId;
-    // Guarda data da primeira ativação (para cálculo dos 7 dias CDC)
+    // Guarda data da primeira ativação (para cálculo dos 7 dias)
     if (!user.activatedAt) user.activatedAt = Date.now();
     // Renova ou define expiração: se já tem planExpiry futuro, soma 30 dias; senão começa do zero
     const base = (user.planExpiry && user.planExpiry > Date.now()) ? user.planExpiry : Date.now();
     user.planExpiry = base + THIRTY_DAYS;
-    console.log('[WEBHOOK] Acesso ativado até:', new Date(user.planExpiry).toISOString());
+    console.log('[WEBHOOK] Acesso Standard ativado até:', new Date(user.planExpiry).toISOString());
 
     // E-mail de boas-vindas com acesso
     const APP_URL = process.env.APP_URL || 'https://minhataxareal.com.br';
@@ -386,18 +428,26 @@ app.post('/api/kiwify/webhook', async (req, res) => {
     console.log('[WEBHOOK] Acesso ativado e e-mail enviado para:', buyerEmail);
   }
 
-  // ── REEMBOLSO / CHARGEBACK ── bloqueia o acesso
+  // ── REEMBOLSO / CHARGEBACK ──
   if (status === 'refunded' || status === 'chargedback' || status === 'chargeback') {
     const user = DB.users.get(buyerEmail);
     if (user) {
-      user.activationPaid = false;
-      user.plan = 'refunded';
-      user.planExpiry = null;
-      // Revoga todos os tokens do usuário
-      for (const [jti, entry] of DB.tokens.entries()) {
-        if (entry.email === buyerEmail) DB.tokens.delete(jti);
+      if (isPremiumSubscription) {
+        // Cancelamento/reembolso da assinatura Premium → downgrade para standard
+        user.tier = 'standard';
+        console.log('[WEBHOOK] Downgrade para Standard por reembolso Premium:', buyerEmail);
+      } else {
+        // Reembolso do plano principal → revoga todo o acesso
+        user.activationPaid = false;
+        user.plan = 'refunded';
+        user.planExpiry = null;
+        user.tier = 'standard';
+        // Revoga todos os tokens do usuário
+        for (const [jti, entry] of DB.tokens.entries()) {
+          if (entry.email === buyerEmail) DB.tokens.delete(jti);
+        }
+        console.log('[WEBHOOK] Acesso revogado por reembolso:', buyerEmail);
       }
-      console.log('[WEBHOOK] Acesso revogado por reembolso:', buyerEmail);
     }
   }
 
