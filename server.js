@@ -49,7 +49,7 @@ async function carregarContasEspeciais() {
   const masterEmail = process.env.MASTER_EMAIL;
   const masterPass  = process.env.MASTER_PASS;
   if (masterEmail && masterPass) {
-    const hash = await bcrypt.hash(masterPass, 12);
+    const hash = await bcrypt.hash(masterPass, 10); // custo 10: ~100ms vs ~500ms do 12 — suficiente para contas fixas
     DB.users.set(masterEmail.toLowerCase(), {
       email: masterEmail.toLowerCase(),
       passwordHash: hash,
@@ -71,7 +71,7 @@ async function carregarContasEspeciais() {
   const demoEmail = 'demo@minhataxareal.com.br';
   const demoPass  = process.env.DEMO_PASS;
   if (demoPass) {
-    const hash = await bcrypt.hash(demoPass, 12);
+    const hash = await bcrypt.hash(demoPass, 10);
     DB.users.set(demoEmail, {
       email: demoEmail,
       passwordHash: hash,
