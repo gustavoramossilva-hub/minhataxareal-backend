@@ -49,7 +49,7 @@ async function carregarContasEspeciais() {
   const masterEmail = process.env.MASTER_EMAIL;
   const masterPass  = process.env.MASTER_PASS;
   if (masterEmail && masterPass) {
-    const hash = await bcrypt.hash(masterPass, 10); // custo 10: ~100ms vs ~500ms do 12 — suficiente para contas fixas
+    const hash = await bcrypt.hash(masterPass, 12);
     DB.users.set(masterEmail.toLowerCase(), {
       email: masterEmail.toLowerCase(),
       passwordHash: hash,
@@ -71,7 +71,7 @@ async function carregarContasEspeciais() {
   const demoEmail = 'demo@minhataxareal.com.br';
   const demoPass  = process.env.DEMO_PASS;
   if (demoPass) {
-    const hash = await bcrypt.hash(demoPass, 10);
+    const hash = await bcrypt.hash(demoPass, 12);
     DB.users.set(demoEmail, {
       email: demoEmail,
       passwordHash: hash,
@@ -85,6 +85,46 @@ async function carregarContasEspeciais() {
       lastLogin: null,
     });
     console.log('[DEMO] Conta demo carregada:', demoEmail);
+  }
+
+  // ── CONTA DEMO PERITO ──
+  const demoPerito = 'demo.perito@minhataxareal.com.br';
+  const demoPeritoPas = process.env.DEMO_PERITO_PASS;
+  if (demoPeritoPas) {
+    const hash = await bcrypt.hash(demoPeritoPas, 12);
+    DB.users.set(demoPerito, {
+      email: demoPerito,
+      passwordHash: hash,
+      name: 'Demo Perito',
+      plan: 'demo',
+      activationPaid: true,
+      isDemo: true,
+      kiwifyOrderId: 'demo-perito',
+      tier: 'premium',
+      createdAt: Date.now(),
+      lastLogin: null,
+    });
+    console.log('[DEMO] Conta demo perito carregada:', demoPerito);
+  }
+
+  // ── CONTA DEMO ADVOGADO ──
+  const demoAdv = 'demo.adv@minhataxareal.com.br';
+  const demoAdvPass = process.env.DEMO_ADV_PASS;
+  if (demoAdvPass) {
+    const hash = await bcrypt.hash(demoAdvPass, 12);
+    DB.users.set(demoAdv, {
+      email: demoAdv,
+      passwordHash: hash,
+      name: 'Demo Advogado',
+      plan: 'demo',
+      activationPaid: true,
+      isDemo: true,
+      kiwifyOrderId: 'demo-adv',
+      tier: 'premium',
+      createdAt: Date.now(),
+      lastLogin: null,
+    });
+    console.log('[DEMO] Conta demo advogado carregada:', demoAdv);
   }
 }
 
@@ -188,7 +228,7 @@ app.get('/api/health', (req, res) => {
 
 // Registro
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, name, tier } = req.body;
+  const { email, password, name } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'E-mail, senha e nome são obrigatórios' });
   }
@@ -200,18 +240,16 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(409).json({ error: 'E-mail já cadastrado' });
   }
   const passwordHash = await bcrypt.hash(password, 12);
-  const validTier = tier === 'premium' ? 'premium' : 'standard';
   const user = {
     email: key, passwordHash, name,
     plan: 'none',
-    tier: validTier,
     activationPaid: false,
     kiwifyOrderId: null,
     createdAt: Date.now(),
     lastLogin: null,
   };
   DB.users.set(key, user);
-  console.log('[REGISTRO]', key, '| tier:', validTier);
+  console.log('[REGISTRO]', key);
   res.status(201).json({ message: 'Conta criada. Faça login para continuar.' });
 });
 
@@ -232,7 +270,6 @@ app.post('/api/auth/login', async (req, res) => {
       email: user.email,
       name: user.name,
       plan: user.plan,
-      tier: user.tier || 'standard',
       activationPaid: user.activationPaid,
       planExpiry: user.planExpiry || null,
     },
@@ -260,7 +297,6 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     email: u.email,
     name: u.name,
     plan: u.plan,
-    tier: u.tier || 'standard',
     activationPaid: u.activationPaid,
     planExpiry: u.planExpiry || null,
     activatedAt: u.activatedAt || null,
