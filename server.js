@@ -20,6 +20,8 @@ const cors       = require('cors');
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 const crypto     = require('crypto');
+let cron;
+try { cron = require('node-cron'); } catch(_) { cron = null; }
 
 const app = express();
 
@@ -199,6 +201,65 @@ async function sendEmail(to, subject, html) {
   }
 }
 
+// ── Tier efetivo (considera trial ativo) ──
+function verificarTierEfetivo(u) {
+  if (u.isMaster || u.isDemo) return u.tier || 'premium';
+  if (u.trial && u.trialExpira && Date.now() < u.trialExpira) return 'premium';
+  return u.tier || 'standard';
+}
+
+// ── E-mail de trial ──
+async function enviarEmailTrial(usuario, tipo) {
+  const APP_URL = process.env.APP_URL || 'https://minhataxareal.com.br';
+  const nome = usuario.name || 'usuário';
+  const urlUpgrade = 'https://pay.kiwify.com.br/1xAQ6ev';
+  const diasRestantes = Math.max(0, Math.ceil((usuario.trialExpira - Date.now()) / 86400000));
+
+  const templates = {
+    dia1: {
+      subject: '🎉 Seu trial Premium está ativo — explore tudo por 15 dias',
+      html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
+        <h1 style="color:#d4f03c;font-size:22px;margin-bottom:8px">Bem-vindo ao MinhaTaxaReal Premium!</h1>
+        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Sua conta foi criada com acesso <strong style="color:#d4f03c">Premium gratuito por 15 dias</strong>.</p>
+        <div style="background:#1e2026;border-radius:8px;padding:16px;margin-bottom:20px">
+          <p style="margin:0 0 8px;color:#8a8880;font-size:13px">✓ Atualização Monetária (EC 113/2021)</p>
+          <p style="margin:0 0 8px;color:#8a8880;font-size:13px">✓ Apuração de Inadimplência e Extrato</p>
+          <p style="margin:0 0 8px;color:#8a8880;font-size:13px">✓ Export PDF e Excel profissional</p>
+          <p style="margin:0;color:#8a8880;font-size:13px">✓ Dados históricos completos BCB/SGS</p>
+        </div>
+        <a href="${APP_URL}/simulador.html" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Explorar ferramentas →</a>
+        <hr style="border:1px solid #1e2026;margin:28px 0">
+        <p style="color:#545250;font-size:12px">Trial válido por 15 dias. Nenhum cartão de crédito exigido durante o período.</p>
+      </div>`,
+    },
+    dia8: {
+      subject: '⏳ Você está na metade do seu trial — 7 dias restantes',
+      html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
+        <h1 style="color:#f5a623;font-size:22px;margin-bottom:8px">Você usou metade do seu trial!</h1>
+        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Faltam <strong style="color:#d4f03c">${diasRestantes} dias</strong> para seu acesso Premium expirar.</p>
+        <p style="color:#8a8880;margin-bottom:20px">Continue aproveitando a Atualização Monetária com EC 113/2021, exportação PDF/Excel e todos os índices históricos do Banco Central.</p>
+        <a href="${urlUpgrade}" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Manter acesso Premium →</a>
+        <p style="color:#545250;font-size:12px;margin-top:20px">Ou continue usando até o final do trial sem custo.</p>
+      </div>`,
+    },
+    dia14: {
+      subject: '🚨 Último dia do trial — mantenha seu acesso Premium',
+      html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
+        <h1 style="color:#f05252;font-size:22px;margin-bottom:8px">Seu trial expira amanhã!</h1>
+        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Amanhã seu acesso Premium será encerrado. Para continuar usando sem interrupção:</p>
+        <a href="${urlUpgrade}" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Assinar Premium agora →</a>
+        <p style="color:#8a8880;font-size:13px;margin-top:20px">Sem assinatura, sua conta passa para o plano Standard após o trial.</p>
+        <hr style="border:1px solid #1e2026;margin:20px 0">
+        <p style="color:#545250;font-size:12px">MinhaTaxaReal · Ferramenta de uso exclusivamente educativo e informativo.</p>
+      </div>`,
+    },
+  };
+
+  const tpl = templates[tipo];
+  if (!tpl) return;
+  await sendEmail(usuario.email, tpl.subject, tpl.html);
+}
+
 // ══════════════════════════════════════════════════════════════
 //  ROTAS DE AUTENTICAÇÃO
 // ══════════════════════════════════════════════════════════════
@@ -240,16 +301,26 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(409).json({ error: 'E-mail já cadastrado' });
   }
   const passwordHash = await bcrypt.hash(password, 12);
+  const agora = Date.now();
   const user = {
     email: key, passwordHash, name,
-    plan: 'none',
+    plan: 'trial',
     activationPaid: false,
     kiwifyOrderId: null,
-    createdAt: Date.now(),
+    createdAt: agora,
     lastLogin: null,
+    tier: 'standard',
+    trial: true,
+    trialInicio: agora,
+    trialExpira: agora + 15 * 24 * 60 * 60 * 1000,
+    emailTrialD1: false,
+    emailTrialD8: false,
+    emailTrialD14: false,
   };
   DB.users.set(key, user);
-  console.log('[REGISTRO]', key);
+  console.log('[REGISTRO]', key, '| trial até', new Date(user.trialExpira).toISOString());
+  // Envia e-mail de boas-vindas do trial assincronamente
+  enviarEmailTrial(user, 'dia1').then(() => { user.emailTrialD1 = true; }).catch(() => {});
   res.status(201).json({ message: 'Conta criada. Faça login para continuar.' });
 });
 
@@ -293,6 +364,10 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     console.log('[ACESSO EXPIRADO]', u.email);
   }
 
+  const trialAtivo = !!(u.trial && u.trialExpira && Date.now() < u.trialExpira);
+  const trialExpirado = !!(u.trial && u.trialExpira && Date.now() >= u.trialExpira);
+  const diasRestantesTrial = trialAtivo ? Math.ceil((u.trialExpira - Date.now()) / 86400000) : 0;
+
   res.json({
     email: u.email,
     name: u.name,
@@ -300,7 +375,12 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
     activationPaid: u.activationPaid,
     planExpiry: u.planExpiry || null,
     activatedAt: u.activatedAt || null,
-    tier: u.tier || 'standard',
+    tier: verificarTierEfetivo(u),
+    trial: u.trial || false,
+    trialExpira: u.trialExpira || null,
+    trialAtivo,
+    trialExpirado,
+    diasRestantesTrial,
   });
 });
 
@@ -541,12 +621,48 @@ app.post('/api/auth/cancel-request', verifyToken, async (req, res) => {
   res.json({ ok: true, diasRestantes });
 });
 
+// ── Status do trial ──
+app.get('/api/auth/trial-status', verifyToken, (req, res) => {
+  const u = req.user;
+  if (!u.trial) return res.json({ emTrial: false, diasRestantes: 0, trialExpirado: false, trialExpira: null });
+  const agora = Date.now();
+  const emTrial = !!(u.trialExpira && agora < u.trialExpira);
+  const trialExpirado = !!(u.trialExpira && agora >= u.trialExpira);
+  const diasRestantes = emTrial ? Math.ceil((u.trialExpira - agora) / 86400000) : 0;
+  res.json({ emTrial, diasRestantes, trialExpirado, trialExpira: u.trialExpira || null });
+});
+
+// ── Job diário: envio de e-mails de trial (8h) ──
+function iniciarCronTrial() {
+  if (!cron) { console.warn('[CRON] node-cron não instalado — job de trial desativado'); return; }
+  cron.schedule('0 8 * * *', async () => {
+    console.log('[CRON] Verificando e-mails de trial...');
+    const agora = Date.now();
+    for (const u of DB.users.values()) {
+      if (!u.trial || u.isMaster || u.isDemo) continue;
+      const diasDesdeInicio = Math.floor((agora - u.trialInicio) / 86400000);
+      if (diasDesdeInicio >= 1 && !u.emailTrialD1) {
+        await enviarEmailTrial(u, 'dia1');
+        u.emailTrialD1 = true;
+      } else if (diasDesdeInicio >= 8 && !u.emailTrialD8) {
+        await enviarEmailTrial(u, 'dia8');
+        u.emailTrialD8 = true;
+      } else if (diasDesdeInicio >= 14 && !u.emailTrialD14) {
+        await enviarEmailTrial(u, 'dia14');
+        u.emailTrialD14 = true;
+      }
+    }
+  }, { timezone: 'America/Sao_Paulo' });
+  console.log('[CRON] Job de trial agendado (08:00 BRT)');
+}
+
 // ══════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3001;
 
 // Carrega contas especiais ANTES de aceitar conexões
 carregarContasEspeciais().then(() => {
+  iniciarCronTrial();
   app.listen(PORT, () => {
     console.log(`MinhaTaxaReal backend rodando na porta ${PORT}`);
     console.log('Ambiente:', process.env.NODE_ENV || 'development');
