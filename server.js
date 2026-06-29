@@ -335,6 +335,10 @@ app.post('/api/auth/login', async (req, res) => {
   user.lastLogin = Date.now();
   const token = signToken(user);
   console.log('[LOGIN]', key);
+  const agora = Date.now();
+  const trialAtivo = !!(user.trial && user.trialExpira && agora < user.trialExpira);
+  const trialExpirado = !!(user.trial && user.trialExpira && agora >= user.trialExpira);
+  const diasRestantesTrial = trialAtivo ? Math.ceil((user.trialExpira - agora) / 86400000) : 0;
   res.json({
     token,
     user: {
@@ -343,6 +347,12 @@ app.post('/api/auth/login', async (req, res) => {
       plan: user.plan,
       activationPaid: user.activationPaid,
       planExpiry: user.planExpiry || null,
+      tier: verificarTierEfetivo(user),
+      trial: user.trial || false,
+      trialExpira: user.trialExpira || null,
+      trialAtivo,
+      trialExpirado,
+      diasRestantesTrial,
     },
   });
 });
