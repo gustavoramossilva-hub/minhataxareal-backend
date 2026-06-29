@@ -26,14 +26,30 @@ try { cron = require('node-cron'); } catch(_) { cron = null; }
 const app = express();
 
 // ── CORS ──
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5500').split(',');
-app.use(cors({
+const ALLOWED_ORIGINS = [
+  'https://minhataxareal.com.br',
+  'https://www.minhataxareal.com.br',
+  'http://localhost:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : []),
+];
+
+const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o.trim()))) return cb(null, true);
-    cb(new Error('CORS bloqueado: ' + origin));
+    // Sem origin = Postman, curl, mobile apps, browsers enviando "null" — permite
+    if (!origin || origin === 'null') return cb(null, true);
+    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true);
+    console.warn('[CORS] Origem não listada (permitida temporariamente):', origin);
+    cb(null, true); // permite durante diagnóstico — remover após estabilização
   },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Raw body para validação do webhook Kiwify (antes do express.json)
 app.use('/api/kiwify/webhook', express.raw({ type: 'application/json' }));
