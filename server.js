@@ -217,10 +217,10 @@ async function enviarEmailTrial(usuario, tipo) {
 
   const templates = {
     dia1: {
-      subject: '🎉 Seu trial Premium está ativo — explore tudo por 15 dias',
+      subject: '🎉 Seu trial Premium está ativo — explore tudo por 10 dias',
       html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
         <h1 style="color:#d4f03c;font-size:22px;margin-bottom:8px">Bem-vindo ao MinhaTaxaReal Premium!</h1>
-        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Sua conta foi criada com acesso <strong style="color:#d4f03c">Premium gratuito por 15 dias</strong>.</p>
+        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Sua conta foi criada com acesso <strong style="color:#d4f03c">Premium gratuito por 10 dias</strong>.</p>
         <div style="background:#1e2026;border-radius:8px;padding:16px;margin-bottom:20px">
           <p style="margin:0 0 8px;color:#8a8880;font-size:13px">✓ Atualização Monetária (EC 113/2021)</p>
           <p style="margin:0 0 8px;color:#8a8880;font-size:13px">✓ Apuração de Inadimplência e Extrato</p>
@@ -229,21 +229,21 @@ async function enviarEmailTrial(usuario, tipo) {
         </div>
         <a href="${APP_URL}/simulador.html" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Explorar ferramentas →</a>
         <hr style="border:1px solid #1e2026;margin:28px 0">
-        <p style="color:#545250;font-size:12px">Trial válido por 15 dias. Nenhum cartão de crédito exigido durante o período.</p>
+        <p style="color:#545250;font-size:12px">Trial válido por 10 dias. Nenhum cartão de crédito exigido durante o período.</p>
       </div>`,
     },
     dia8: {
-      subject: '⏳ Você está na metade do seu trial — 7 dias restantes',
+      subject: '⏳ Você tem 3 dias restantes no MinhaTaxaReal',
       html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
-        <h1 style="color:#f5a623;font-size:22px;margin-bottom:8px">Você usou metade do seu trial!</h1>
-        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Faltam <strong style="color:#d4f03c">${diasRestantes} dias</strong> para seu acesso Premium expirar.</p>
+        <h1 style="color:#f5a623;font-size:22px;margin-bottom:8px">Seu trial encerra em breve!</h1>
+        <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Faltam <strong style="color:#d4f03c">3 dias</strong> para seu acesso Premium expirar.</p>
         <p style="color:#8a8880;margin-bottom:20px">Continue aproveitando a Atualização Monetária com EC 113/2021, exportação PDF/Excel e todos os índices históricos do Banco Central.</p>
         <a href="${urlUpgrade}" style="display:inline-block;background:#d4f03c;color:#0e0f11;font-weight:bold;padding:14px 28px;border-radius:8px;text-decoration:none;font-size:15px">Manter acesso Premium →</a>
         <p style="color:#545250;font-size:12px;margin-top:20px">Ou continue usando até o final do trial sem custo.</p>
       </div>`,
     },
     dia14: {
-      subject: '🚨 Último dia do trial — mantenha seu acesso Premium',
+      subject: '⚠️ Seu acesso gratuito encerra amanhã',
       html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0e0f11;color:#f0ede8;border-radius:12px">
         <h1 style="color:#f05252;font-size:22px;margin-bottom:8px">Seu trial expira amanhã!</h1>
         <p style="color:#8a8880;margin-bottom:20px">Olá, <strong style="color:#f0ede8">${nome}</strong>. Amanhã seu acesso Premium será encerrado. Para continuar usando sem interrupção:</p>
@@ -312,7 +312,7 @@ app.post('/api/auth/register', async (req, res) => {
     tier: 'standard',
     trial: true,
     trialInicio: agora,
-    trialExpira: agora + 15 * 24 * 60 * 60 * 1000,
+    trialExpira: agora + 10 * 24 * 60 * 60 * 1000,
     emailTrialD1: false,
     emailTrialD8: false,
     emailTrialD14: false,
@@ -644,10 +644,10 @@ function iniciarCronTrial() {
       if (diasDesdeInicio >= 1 && !u.emailTrialD1) {
         await enviarEmailTrial(u, 'dia1');
         u.emailTrialD1 = true;
-      } else if (diasDesdeInicio >= 8 && !u.emailTrialD8) {
+      } else if (diasDesdeInicio >= 7 && !u.emailTrialD8) {
         await enviarEmailTrial(u, 'dia8');
         u.emailTrialD8 = true;
-      } else if (diasDesdeInicio >= 14 && !u.emailTrialD14) {
+      } else if (diasDesdeInicio >= 9 && !u.emailTrialD14) {
         await enviarEmailTrial(u, 'dia14');
         u.emailTrialD14 = true;
       }
