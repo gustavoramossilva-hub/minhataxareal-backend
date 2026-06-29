@@ -49,7 +49,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('/(.*)', cors(corsOptions));
 
 // Raw body para validação do webhook Kiwify (antes do express.json)
 app.use('/api/kiwify/webhook', express.raw({ type: 'application/json' }));
