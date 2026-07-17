@@ -17,6 +17,7 @@ const express    = require('express');
 const jwt        = require('jsonwebtoken');
 const bcrypt     = require('bcryptjs');
 const cors       = require('cors');
+const helmet     = require('helmet');
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 const crypto     = require('crypto');
@@ -25,10 +26,43 @@ try { cron = require('node-cron'); } catch(_) { cron = null; }
 
 const app = express();
 
+// ── Headers de segurança (Helmet) ──
+// Observação: este backend serve JSON (API); o CSP abaixo vale para qualquer
+// resposta renderizável (páginas de erro) e os CDNs liberados são os usados
+// pelo produto. HSTS força HTTPS por 1 ano incluindo subdomínios.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'",
+        "https://cdnjs.cloudflare.com",
+        "https://www.googletagmanager.com"],
+      styleSrc: ["'self'", "'unsafe-inline'",
+        "https://fonts.googleapis.com"],
+      fontSrc: ["'self'",
+        "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'",
+        "https://api.bcb.gov.br",
+        "https://minhataxareal-backend.onrender.com",
+        "https://www.google-analytics.com"],
+      frameAncestors: ["'self'",
+        "https://minhataxareal.com.br"]
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true
+  }
+}));
+// Remove o header que expõe a stack (Helmet também cobre; explícito por garantia)
+app.disable('x-powered-by');
+
 // ── CORS ──
 const ALLOWED_ORIGINS = [
   'https://minhataxareal.com.br',
   'https://www.minhataxareal.com.br',
+  'https://minhataxareal-frontend.pages.dev',
   'http://localhost:3000',
   'http://localhost:5500',
   'http://127.0.0.1:5500',
@@ -39,9 +73,14 @@ const corsOptions = {
   origin: (origin, cb) => {
     // Sem origin = Postman, curl, mobile apps, browsers enviando "null" — permite
     if (!origin || origin === 'null') return cb(null, true);
-    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true);
-    console.warn('[CORS] Origem não listada (permitida temporariamente):', origin);
-    cb(null, true); // permite durante diagnóstico — remover após estabilização
+    // Igualdade EXATA (startsWith permitia bypass por prefixo de domínio,
+    // ex.: https://minhataxareal.com.br.evil.com)
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Origem não permitida: cb(null, false) bloqueia SEM lançar Error —
+    // a resposta sai sem os headers CORS (o navegador bloqueia) em vez de
+    // derrubar a requisição com 500 e poluir os logs com stack trace.
+    console.log('[CORS] Origem bloqueada:', origin);
+    return cb(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -49,7 +88,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('/(.*)', cors(corsOptions));
+// Preflight OPTIONS: o próprio app.use(cors()) responde OPTIONS em todas as
+// rotas. NÃO registrar app.options('/(.*)' ...) — no Express 5/path-to-regexp
+// v8 esse padrão lança PathError e DERRUBA o servidor no boot (sintaxe v8
+// seria '*splat'); a linha era redundante de qualquer forma.
 
 // Raw body para validação do webhook Kiwify (antes do express.json)
 app.use('/api/kiwify/webhook', express.raw({ type: 'application/json' }));
@@ -681,6 +723,17 @@ function iniciarCronTrial() {
   }, { timezone: 'America/Sao_Paulo' });
   console.log('[CRON] Job de trial agendado (08:00 BRT)');
 }
+
+// ══════════════════════════════════════════════════════════════
+//  TRATAMENTO DE ERRO GENÉRICO — captura qualquer exceção não tratada
+//  (registrado após todas as rotas). Nunca vaza stack trace nem 500 cru.
+// ══════════════════════════════════════════════════════════════
+app.use((err, req, res, next) => {
+  console.error('[ERRO NÃO TRATADO]', err.message);
+  res.status(err.status || 500).json({
+    erro: 'Erro ao processar a requisição.'
+  });
+});
 
 // ══════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════
